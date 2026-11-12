@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Button, Card, Mode, Note } from "@/components/bits";
+import { Button, Card, Loading, Mode, Note } from "@/components/bits";
 import { Shell } from "@/components/shell";
 import { askShop, capturePayment, placeOrder } from "@/lib/awning.functions";
 import { SAMPLE_ASK } from "@/lib/boards";
@@ -38,7 +38,7 @@ function BuyerPage() {
   if (pending || !snapshot) {
     return (
       <Shell>
-        <p className="text-muted">{error || "Opening the buyer…"}</p>
+        {error ? <p className="text-muted">{error}</p> : <Loading label="Opening the buyer…" />}
       </Shell>
     );
   }
@@ -63,7 +63,7 @@ function BuyerPage() {
           />
         </label>
         <Button disabled={busy} onClick={() => void ask(false)}>
-          Ask Linden
+          {busy ? "Asking…" : "Ask Linden"}
         </Button>
         {quote?.intent ? (
           <p className="break-all font-mono text-xs text-muted">

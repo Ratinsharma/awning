@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Button, Card, ApprovalCard, Mode, Note } from "@/components/bits";
+import { Button, Card, ApprovalCard, Loading, Mode, Note } from "@/components/bits";
 import { Shell } from "@/components/shell";
 import {
   addGap,
@@ -54,7 +54,7 @@ function JudgePage() {
   if (pending || !snapshot) {
     return (
       <Shell>
-        <p className="text-muted">{error || "Preparing the tour…"}</p>
+        {error ? <p className="text-muted">{error}</p> : <Loading label="Preparing the tour…" />}
       </Shell>
     );
   }

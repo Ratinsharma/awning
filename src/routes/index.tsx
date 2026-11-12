@@ -17,6 +17,19 @@ function Home() {
         alt="Sample chalkboard for Linden, a café with no website"
         className="w-full rounded-2xl border border-line"
       />
+      <ol className="grid gap-2 sm:grid-cols-3">
+        {[
+          ["1", "Ask", "An agent asks for something missing."],
+          ["2", "Add", "One tap puts it on the board."],
+          ["3", "Buy", "The same agent checks out."],
+        ].map(([n, title, body]) => (
+          <li key={n} className="rounded-2xl border border-line bg-surface p-3">
+            <p className="font-mono text-xs text-primary">{n}</p>
+            <p className="text-base">{title}</p>
+            <p className="text-sm text-muted">{body}</p>
+          </li>
+        ))}
+      </ol>
       <div className="flex flex-col gap-2 sm:flex-row">
         <Link
           to="/judge"

@@ -10,21 +10,23 @@ const LINKS = [
 export function Shell({ children }: { children: ReactNode }) {
   const path = useRouterState({ select: (state) => state.location.pathname });
   return (
-    <div className="min-h-screen bg-bg text-fg">
+    <div className="min-h-screen overflow-x-hidden bg-bg text-fg">
       <div className="awning" />
-      <header className="sticky top-0 z-10 border-b border-line bg-bg">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3">
-          <Link to="/" className="font-serif text-xl tracking-tight">
+      <header className="sticky top-0 z-10 border-b border-line bg-bg/95 backdrop-blur">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-2 px-4 py-3">
+          <Link to="/" className="shrink-0 font-serif text-xl tracking-tight">
             Awning
           </Link>
-          <nav className="flex gap-1">
+          <nav className="flex min-w-0 gap-0.5">
             {LINKS.map((link) => {
               const on = path === link.to;
               return (
                 <Link
                   key={link.to}
                   to={link.to}
-                  className={`inline-flex min-h-11 items-center rounded-lg px-3 text-sm ${on ? "bg-surface text-fg" : "text-muted"}`}
+                  className={`inline-flex min-h-11 items-center rounded-lg px-2.5 text-sm sm:px-3 ${
+                    on ? "bg-surface text-fg" : "text-muted"
+                  }`}
                 >
                   {link.label}
                 </Link>

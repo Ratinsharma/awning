@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import type { CellValueChangedEvent, ColDef } from "ag-grid-community";
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
-import { Button, Card, ApprovalCard, Mode, Note } from "@/components/bits";
+import { Button, Card, ApprovalCard, Chip, Loading, Mode, Note } from "@/components/bits";
 import { Ledger } from "@/components/grids";
 import { Shell } from "@/components/shell";
 import { RESYNC_BOARD } from "@/lib/boards";
@@ -123,7 +123,7 @@ function ShopPage() {
   if (pending || !snapshot) {
     return (
       <Shell>
-        <p className="text-muted">{error || "Opening the shop…"}</p>
+        {error ? <p className="text-muted">{error}</p> : <Loading label="Opening the shop…" />}
       </Shell>
     );
   }
@@ -194,9 +194,7 @@ function ShopPage() {
             <Ledger rows={rows} columns={columns} empty="The board is empty." onCellValueChanged={(event) => void onEdit(event)} />
             <div className="flex flex-wrap gap-2">
               {snapshot.shop.rules.map((rule) => (
-                <span key={rule.id} className="rounded-full border border-line px-3 py-1 text-sm text-fg">
-                  {ruleLabel(rule)}
-                </span>
+                <Chip key={rule.id}>{ruleLabel(rule)}</Chip>
               ))}
             </div>
             <label className="flex flex-col gap-2 text-sm text-muted">

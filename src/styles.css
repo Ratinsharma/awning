@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #121410;
+  --color-surface: #1c2118;
+  --color-fg: #f4f0e6;
+  --color-muted: #b3aa9a;
+  --color-line: #34392e;
+  --color-primary: #e4b15a;
+  --color-danger: #d4654a;
+  --font-serif: "Newsreader", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --radius-card: 1rem;
+}
+
+@layer base {
+  html {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    font-family: var(--font-serif);
+    min-height: 100%;
+  }
+  h1, h2, h3 { text-wrap: balance; }
+  p { text-wrap: pretty; }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) { cursor: pointer; }
+}
+
+.awning {
+  height: 0.65rem;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-primary) 0 0.9rem,
+    var(--color-danger) 0.9rem 1.8rem,
+    var(--color-bg) 1.8rem 2.7rem
+  );
+}

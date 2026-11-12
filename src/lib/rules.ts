@@ -65,6 +65,12 @@ export function isRule(value: unknown): value is Rule {
   return false;
 }
 
+export function isOwnerLimit(decision: Decision, rules: Rule[]): boolean {
+  if (decision.ok) return false;
+  if (decision.ruleId === "intent-cap") return true;
+  return rules.some((rule) => rule.type === "max_qty" && rule.id === decision.ruleId);
+}
+
 export function authorize(input: {
   rules: Rule[];
   lines: CartLine[];

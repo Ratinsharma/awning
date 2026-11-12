@@ -1,4 +1,16 @@
 import { createHash } from "node:crypto";
+import { paypalRequestId, totalsMatch } from "./paypal-id";
+import {
+  restCaptureOrder,
+  restCreateOrder,
+  restCreateProduct,
+  restReadRefund,
+  restRefundCapture,
+  restTrackOrder,
+  restVaultSetup,
+  type RestOrder,
+} from "./paypal-rest";
+import { runLocalToolkit } from "./paypal-toolkit.server";
 
 const SANDBOX = "https://api-m.sandbox.paypal.com";
 
@@ -6,6 +18,7 @@ export type SandboxCreds = { clientId: string; secret: string };
 
 type Fail = { ok: false; summary: string };
 type Ok<T> = { ok: true; body: T };
+type MoneyTool = "create_order" | "pay_order" | "create_refund" | "create_product" | "create_shipment_tracking" | "vault";
 
 const globalRef = globalThis as typeof globalThis & {
   __awningCreds?: SandboxCreds;
@@ -102,19 +115,48 @@ export async function accessToken(creds: SandboxCreds): Promise<string> {
   return body.access_token;
 }
 
+async function callMoney<T>(input: {
+  creds: SandboxCreds;
+  runId: string;
+  toolName: MoneyTool;
+  args: unknown;
+  rest: (requestId: string) => Promise<Ok<T> | Fail>;
+}): Promise<Ok<T> | Fail> {
+  const requestId = paypalRequestId(input.runId, input.toolName, input.args);
+  if (input.toolName !== "vault") {
+    let token: string;
+    try {
+      token = await accessToken(input.creds);
+    } catch (error) {
+      return { ok: false, summary: error instanceof Error ? error.message : "PayPal token failed." };
+    }
+    const viaToolkit = await runLocalToolkit({
+      token,
+      toolName: input.toolName,
+      args: input.args,
+      requestId,
+    });
+    if (viaToolkit.ok) return { ok: true, body: viaToolkit.body as T };
+  }
+  return input.rest(requestId);
+}
+
 export async function createCatalogProduct(
   creds: SandboxCreds,
   product: { name: string; detail: string; sku: string },
 ): Promise<Ok<{ id?: string }> | Fail> {
-  return paypal(`/v1/catalogs/products`, creds, {
-    method: "POST",
-    requestId: `awning-product-${product.sku}`,
-    body: {
-      name: product.name.slice(0, 127),
-      description: (product.detail || product.name).slice(0, 256),
-      type: "PHYSICAL",
-      home_url: "https://example.com/shops/linden",
-    },
+  const args = {
+    name: product.name.slice(0, 127),
+    type: "PHYSICAL",
+    description: (product.detail || product.name).slice(0, 256),
+    home_url: "https://example.com/shops/linden",
+  };
+  return callMoney({
+    creds,
+    runId: product.sku,
+    toolName: "create_product",
+    args,
+    rest: (requestId) => restCreateProduct(creds, requestId, product),
   });
 }
 
@@ -145,67 +187,55 @@ export async function createCheckout(input: {
   creds: SandboxCreds;
   orderId: string;
   lines: { name: string; sku: string; qty: number; unitCents: number }[];
+  totalCents: number;
 }): Promise<Ok<OrderBody> | Fail> {
-  const total = input.lines.reduce((sum, line) => sum + line.unitCents * line.qty, 0);
-  return paypal<OrderBody>("/v2/checkout/orders", input.creds, {
-    method: "POST",
-    requestId: `awning-order-${input.orderId}`,
-    body: {
-      intent: "CAPTURE",
-      purchase_units: [
-        {
-          reference_id: input.orderId.slice(0, 256),
-          custom_id: input.orderId.slice(0, 127),
-          description: "Linden via Awning",
-          amount: {
-            currency_code: "EUR",
-            value: money(total),
-            breakdown: { item_total: { currency_code: "EUR", value: money(total) } },
-          },
-          items: input.lines.map((line) => ({
-            name: line.name.slice(0, 127),
-            sku: line.sku.slice(0, 127),
-            quantity: String(line.qty),
-            category: "PHYSICAL_GOODS",
-            unit_amount: { currency_code: "EUR", value: money(line.unitCents) },
-          })),
-          shipping: {
-            name: { full_name: "Pickup Guest" },
-            address: {
-              address_line_1: "1 Grafton Street",
-              admin_area_2: "Dublin",
-              admin_area_1: "Dublin",
-              postal_code: "D02 AF30",
-              country_code: "IE",
-            },
-          },
-        },
-      ],
-      payment_source: {
-        paypal: {
-          experience_context: {
-            brand_name: "Awning",
-            user_action: "PAY_NOW",
-            shipping_preference: "SET_PROVIDED_ADDRESS",
-            return_url: "https://example.com/awning/return",
-            cancel_url: "https://example.com/awning/cancel",
-          },
-        },
-      },
-    },
+  if (!totalsMatch(input.lines, input.totalCents)) {
+    return { ok: false, summary: "Order total does not match quantity × price." };
+  }
+  const args = {
+    currencyCode: "EUR",
+    items: input.lines.map((line) => ({
+      name: line.name,
+      quantity: line.qty,
+      description: line.sku,
+      itemCost: line.unitCents / 100,
+      taxPercent: 0,
+      itemTotal: (line.unitCents * line.qty) / 100,
+    })),
+    discount: 0,
+    shippingCost: 0,
+  };
+  const created = await callMoney<RestOrder>({
+    creds: input.creds,
+    runId: input.orderId,
+    toolName: "create_order",
+    args,
+    rest: (requestId) =>
+      restCreateOrder(input.creds, requestId, {
+        orderId: input.orderId,
+        lines: input.lines,
+        totalCents: input.totalCents,
+      }),
   });
+  if (!created.ok) return created;
+  return { ok: true, body: asOrder(created.body) };
 }
 
 export async function readCheckout(creds: SandboxCreds, paypalOrderId: string) {
   return paypal<OrderBody>(`/v2/checkout/orders/${encodeURIComponent(paypalOrderId)}`, creds);
 }
 
-export async function captureCheckout(creds: SandboxCreds, paypalOrderId: string) {
-  return paypal<OrderBody>(`/v2/checkout/orders/${encodeURIComponent(paypalOrderId)}/capture`, creds, {
-    method: "POST",
-    requestId: `awning-capture-${paypalOrderId}`,
-    body: {},
+export async function captureCheckout(creds: SandboxCreds, paypalOrderId: string): Promise<Ok<OrderBody> | Fail> {
+  const args = { id: paypalOrderId };
+  const captured = await callMoney<RestOrder>({
+    creds,
+    runId: paypalOrderId,
+    toolName: "pay_order",
+    args,
+    rest: (requestId) => restCaptureOrder(creds, requestId, paypalOrderId),
   });
+  if (!captured.ok) return captured;
+  return { ok: true, body: asOrder(captured.body) };
 }
 
 export async function trackCheckout(input: {
@@ -214,42 +244,100 @@ export async function trackCheckout(input: {
   captureId: string;
   trackingNumber: string;
   lines: { name: string; sku: string; qty: number }[];
-}) {
-  return paypal<OrderBody>(`/v2/checkout/orders/${encodeURIComponent(input.paypalOrderId)}/track`, input.creds, {
-    method: "POST",
-    requestId: `awning-track-${input.captureId}`,
-    body: {
-      capture_id: input.captureId,
-      tracking_number: input.trackingNumber,
-      carrier: "OTHER",
-      carrier_name_other: "Pickup",
-      notify_payer: false,
-      items: input.lines.map((line) => ({
-        name: line.name,
-        sku: line.sku,
-        quantity: String(line.qty),
-      })),
-    },
+}): Promise<Ok<OrderBody> | Fail> {
+  const args = {
+    order_id: input.paypalOrderId,
+    transaction_id: input.captureId,
+    tracking_number: input.trackingNumber,
+    status: "SHIPPED",
+    carrier: "OTHER",
+  };
+  const tracked = await callMoney<RestOrder>({
+    creds: input.creds,
+    runId: input.captureId,
+    toolName: "create_shipment_tracking",
+    args,
+    rest: (requestId) => restTrackOrder(input.creds, requestId, input),
   });
+  if (!tracked.ok) return tracked;
+  return { ok: true, body: asOrder(tracked.body) };
 }
 
 export async function refundCapture(creds: SandboxCreds, captureId: string, cents: number, currency: string) {
-  const created = await paypal<{ id?: string; status?: string }>(
-    `/v2/payments/captures/${encodeURIComponent(captureId)}/refund`,
+  const args = {
+    capture_id: captureId,
+    amount: { currency_code: currency, value: money(cents) },
+    note_to_payer: "Awning refund",
+  };
+  const created = await callMoney<{ id?: string; status?: string }>({
     creds,
-    {
-      method: "POST",
-      requestId: `awning-refund-${captureId}`,
-      body: {
-        amount: { currency_code: currency, value: money(cents) },
-        note_to_payer: "Awning refund",
-      },
-    },
-  );
+    runId: captureId,
+    toolName: "create_refund",
+    args,
+    rest: (requestId) => restRefundCapture(creds, requestId, { captureId, cents, currency }),
+  });
   if (!created.ok || !created.body.id) return created;
-  const read = await paypal<{ id?: string; status?: string }>(
-    `/v2/payments/refunds/${encodeURIComponent(created.body.id)}`,
-    creds,
-  );
+  const read = await restReadRefund(creds, created.body.id);
   return read.ok ? read : created;
+}
+
+export async function openVault(creds: SandboxCreds, runId: string) {
+  const args = { usage: "MERCHANT", description: "Linden regular" };
+  return callMoney({
+    creds,
+    runId,
+    toolName: "vault",
+    args,
+    rest: (requestId) => restVaultSetup(creds, requestId),
+  });
+}
+
+export async function chargeVault(input: {
+  creds: SandboxCreds;
+  runId: string;
+  orderId: string;
+  vaultId: string;
+  lines: { name: string; sku: string; qty: number; unitCents: number }[];
+  totalCents: number;
+}) {
+  if (!totalsMatch(input.lines, input.totalCents)) {
+    return { ok: false as const, summary: "Order total does not match quantity × price." };
+  }
+  const args = { vaultId: input.vaultId, totalCents: input.totalCents, currency: "EUR" };
+  const created = await callMoney<RestOrder>({
+    creds: input.creds,
+    runId: input.runId,
+    toolName: "vault",
+    args,
+    rest: (requestId) =>
+      restCreateOrder(input.creds, requestId, {
+        orderId: input.orderId,
+        lines: input.lines,
+        totalCents: input.totalCents,
+        vaultId: input.vaultId,
+      }),
+  });
+  if (!created.ok) return created;
+  return { ok: true as const, body: asOrder(created.body) };
+}
+
+function asOrder(body: unknown): OrderBody {
+  if (!body || typeof body !== "object") return {};
+  const row = body as {
+    id?: string;
+    status?: string;
+    links?: { href?: string; rel?: string }[];
+    purchase_units?: OrderBody["purchase_units"];
+    purchaseUnits?: {
+      payments?: { captures?: { id?: string }[] };
+      shipping?: { trackers?: { id?: string }[] };
+    }[];
+  };
+  const units = row.purchase_units ?? row.purchaseUnits;
+  return {
+    id: row.id,
+    status: row.status,
+    links: row.links,
+    purchase_units: units,
+  };
 }

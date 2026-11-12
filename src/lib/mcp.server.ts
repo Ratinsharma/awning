@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import { menuForAgent, orderStatus, placeShop, quoteShop } from "./shop.server";
+import { buyerFields, wrapUntrusted } from "./untrusted";
 
 function cors(response: Response): Response {
   const headers = new Headers(response.headers);
@@ -25,7 +26,6 @@ function text(payload: unknown) {
 
 function shopServer(slug: string) {
   const server = new McpServer({ name: "awning", version: "1.0.0" });
-  const agent = "mcp";
 
   server.registerTool(
     "browse_menu",
@@ -40,7 +40,12 @@ function shopServer(slug: string) {
       description: "Ask if the shop can make something. Unmatched requests are logged as demand gaps. Cart API shaped validation_issues come back when it cannot.",
       inputSchema: { query: z.string() },
     },
-    async ({ query }) => text((await quoteShop(query, agent, false)).quote),
+    async ({ query }) => {
+      const buyer = buyerFields({ query, agentName: "mcp" });
+      if (!buyer.ok) return text({ ok: false, summary: buyer.summary, untrusted_query: wrapUntrusted(String(query).slice(0, 500)) });
+      const result = await quoteShop(buyer.query, buyer.agentName, false);
+      return text({ ...result.quote, untrusted_query: buyer.wrappedQuery });
+    },
   );
 
   server.registerTool(
@@ -50,7 +55,12 @@ function shopServer(slug: string) {
       description: "Price a request. Set use_alternatives when accepting a SUGGEST_ALTERNATIVE such as tea instead of a flat white.",
       inputSchema: { query: z.string(), use_alternatives: z.boolean().optional() },
     },
-    async ({ query, use_alternatives }) => text((await quoteShop(query, agent, Boolean(use_alternatives))).quote),
+    async ({ query, use_alternatives }) => {
+      const buyer = buyerFields({ query, agentName: "mcp" });
+      if (!buyer.ok) return text({ ok: false, summary: buyer.summary, untrusted_query: wrapUntrusted(String(query).slice(0, 500)) });
+      const result = await quoteShop(buyer.query, buyer.agentName, Boolean(use_alternatives));
+      return text({ ...result.quote, untrusted_query: buyer.wrappedQuery });
+    },
   );
 
   server.registerTool(
@@ -65,7 +75,14 @@ function shopServer(slug: string) {
       },
     },
     async ({ query, notes, use_alternatives }) => {
-      const result = await placeShop({ query, notes, agentName: agent, useAlternatives: Boolean(use_alternatives) });
+      const buyer = buyerFields({ query, notes, agentName: "mcp" });
+      if (!buyer.ok) return text({ ok: false, summary: buyer.summary, untrusted_query: wrapUntrusted(String(query).slice(0, 500)) });
+      const result = await placeShop({
+        query: buyer.query,
+        notes: buyer.notes,
+        agentName: buyer.agentName,
+        useAlternatives: Boolean(use_alternatives),
+      });
       return text({
         ok: result.ok,
         summary: result.summary,
@@ -75,6 +92,8 @@ function shopServer(slug: string) {
         validation_issues: result.quote?.issues ?? [],
         cart: result.quote?.cart ?? null,
         intent_mandate: result.quote?.intent ?? null,
+        untrusted_query: buyer.wrappedQuery,
+        untrusted_notes: buyer.wrappedNotes,
       });
     },
   );

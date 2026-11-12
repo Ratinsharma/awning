@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Button, Card, Mode, Note } from "@/components/bits";
+import { Button, Card, ApprovalCard, Mode, Note } from "@/components/bits";
 import { Shell } from "@/components/shell";
 import {
   addGap,
+  approveOwnerStep,
   askShop,
   capturePayment,
   commitBoard,
@@ -17,6 +18,7 @@ import {
 import { RESYNC_BOARD, SAMPLE_ASK } from "@/lib/boards";
 import { diffBoard } from "@/lib/diff";
 import { euros } from "@/lib/money";
+import { wrapUntrusted } from "@/lib/untrusted";
 import { useShop } from "@/lib/use-shop";
 
 export const Route = createFileRoute("/judge")({ component: JudgePage });
@@ -29,9 +31,8 @@ function JudgePage() {
   const [busy, setBusy] = useState(false);
   const [diff, setDiff] = useState<string[]>([]);
   const waiting = snapshot?.orders.find((order) => order.status === "awaiting_approval");
-  const refundable = snapshot?.orders.find(
-    (order) => order.paypalCaptureId && order.status !== "refunded" && order.status !== "blocked",
-  );
+  const refundable = snapshot?.orders.find((order) => order.status === "captured" || order.status === "tracked");
+  const approvals = snapshot?.orders.filter((order) => order.status === "owner_review" || order.status === "refund_proposed") ?? [];
 
   async function go<T extends { ok: boolean; summary: string; snapshot: NonNullable<typeof snapshot> }>(
     task: () => Promise<T>,
@@ -71,6 +72,18 @@ function JudgePage() {
         Every button calls the same shop the buyer and the MCP endpoint use. Replay ids are not PayPal captures.
         Connect sandbox keys on the shop page first if you want the live path.
       </Note>
+      {approvals.map((order) => (
+        <ApprovalCard
+          key={order.id}
+          busy={busy}
+          title={order.status === "refund_proposed" ? "Refund" : "Over the limit"}
+          detail={`${euros(order.totalCents)} · ${order.lines.map((line) => `${line.qty} ${line.name}`).join(", ")}${
+            order.blockedRule ? ` · Rules check stopped on ${order.blockedRule}.` : " · Rules check: a captured order can be refunded."
+          }${order.notes ? ` ${wrapUntrusted(order.notes)}` : ""}`}
+          onApprove={() => void go(() => approveOwnerStep({ data: { orderId: order.id } }))}
+        />
+      ))}
+
       <img src="/boards/opening.jpg" alt="Opening Linden chalkboard" className="w-full rounded-2xl border border-line" />
 
       <Card className="flex flex-col gap-3">
@@ -143,6 +156,7 @@ function JudgePage() {
 
       <Card className="flex flex-col gap-3">
         <h2 className="text-xl">7. Capture, track, refund</h2>
+        <Note>A refund and an order over the limit wait on the approval card. One tap sends them to PayPal.</Note>
         <div className="flex flex-wrap gap-2">
           <Button
             tone="quiet"
@@ -163,7 +177,14 @@ function JudgePage() {
             disabled={busy || !refundable}
             onClick={() => refundable && void go(() => refundPayment({ data: { orderId: refundable.id } }))}
           >
-            Refund this order
+            Propose refund
+          </Button>
+          <Button
+            tone="quiet"
+            disabled={busy}
+            onClick={() => void go(() => placeOrder({ data: { query: "12 pots of tea", agentName: "judge" } }))}
+          >
+            Propose 12 teas
           </Button>
         </div>
       </Card>

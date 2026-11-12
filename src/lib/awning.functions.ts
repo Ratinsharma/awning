@@ -1,6 +1,8 @@
+import { z } from "zod";
 import { createServerFn } from "@tanstack/react-start";
 import type { BoardItem } from "./diff";
 import type { SandboxCreds } from "./paypal.server";
+import { buyerFields } from "./untrusted";
 
 export const getShop = createServerFn({ method: "GET" }).handler(async () => {
   const { loadSnapshot } = await import("./shop.server");
@@ -56,14 +58,27 @@ export const publishShop = createServerFn({ method: "POST" }).handler(async () =
 });
 
 export const askShop = createServerFn({ method: "POST" })
-  .validator((data: { query: string; agentName: string; useAlternatives?: boolean }) => data)
+  .validator((data: { query: string; agentName: string; useAlternatives?: boolean }) => {
+    const buyer = buyerFields({ query: data.query, agentName: data.agentName });
+    if (!buyer.ok) throw new Error(buyer.summary);
+    return { query: buyer.query, agentName: buyer.agentName, useAlternatives: Boolean(data.useAlternatives) };
+  })
   .handler(async ({ data }) => {
     const { quoteShop } = await import("./shop.server");
-    return quoteShop(data.query, data.agentName || "guest", Boolean(data.useAlternatives));
+    return quoteShop(data.query, data.agentName, data.useAlternatives);
   });
 
 export const placeOrder = createServerFn({ method: "POST" })
-  .validator((data: { query: string; agentName: string; notes?: string; useAlternatives?: boolean }) => data)
+  .validator((data: { query: string; agentName: string; notes?: string; useAlternatives?: boolean }) => {
+    const buyer = buyerFields(data);
+    if (!buyer.ok) throw new Error(buyer.summary);
+    return {
+      query: buyer.query,
+      agentName: buyer.agentName,
+      notes: buyer.notes,
+      useAlternatives: Boolean(data.useAlternatives),
+    };
+  })
   .handler(async ({ data }) => {
     const { placeShop } = await import("./shop.server");
     return placeShop(data);
@@ -84,10 +99,17 @@ export const trackPickup = createServerFn({ method: "POST" })
   });
 
 export const refundPayment = createServerFn({ method: "POST" })
-  .validator((data: { orderId: string }) => data)
+  .validator((data: { orderId: string }) => z.object({ orderId: z.string().min(1).max(80) }).parse(data))
   .handler(async ({ data }) => {
     const { refundShop } = await import("./shop.server");
     return refundShop(data.orderId);
+  });
+
+export const approveOwnerStep = createServerFn({ method: "POST" })
+  .validator((data: { orderId: string }) => z.object({ orderId: z.string().min(1).max(80) }).parse(data))
+  .handler(async ({ data }) => {
+    const { approveOwner } = await import("./shop.server");
+    return approveOwner(data.orderId);
   });
 
 export const addGap = createServerFn({ method: "POST" })

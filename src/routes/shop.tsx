@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import type { CellValueChangedEvent, ColDef } from "ag-grid-community";
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
-import { Button, Card, Mode, Note } from "@/components/bits";
+import { Button, Card, ApprovalCard, Mode, Note } from "@/components/bits";
 import { Ledger } from "@/components/grids";
 import { Shell } from "@/components/shell";
 import { RESYNC_BOARD } from "@/lib/boards";
@@ -10,12 +10,15 @@ import { diffBoard, type DiffLine } from "@/lib/diff";
 import { euros } from "@/lib/money";
 import { previewPathPrefix } from "@/lib/preview-path-prefix";
 import { DEFAULT_RULE_TEXT, ruleLabel } from "@/lib/rules";
+import { wrapUntrusted } from "@/lib/untrusted";
 import {
   addGap,
+  approveOwnerStep,
   askLedger,
   commitBoard,
   connectPayPal,
   disconnectPayPal,
+  placeOrder,
   publishShop,
   readBoard,
   refundPayment,
@@ -253,6 +256,18 @@ function ShopPage() {
 
       {tab === "orders" ? (
         <div className="flex flex-col gap-3">
+          <OwnerQueue
+            orders={snapshot.orders}
+            busy={busy}
+            onApprove={(orderId) => void run(() => approveOwnerStep({ data: { orderId } }))}
+          />
+          <Button
+            tone="quiet"
+            disabled={busy}
+            onClick={() => void run(() => placeOrder({ data: { query: "12 pots of tea", agentName: "owner" } }))}
+          >
+            Propose 12 teas
+          </Button>
           {snapshot.orders.length === 0 ? <Note>No orders yet. The buyer and the judge tour create them.</Note> : null}
           {snapshot.orders.map((order) => (
             <OrderCard key={order.id} order={order} busy={busy} onRun={run} />
@@ -420,6 +435,34 @@ function ShopPage() {
   );
 }
 
+function OwnerQueue({
+  orders,
+  busy,
+  onApprove,
+}: {
+  orders: OrderRow[];
+  busy: boolean;
+  onApprove: (orderId: string) => void;
+}) {
+  const waiting = orders.filter((order) => order.status === "owner_review" || order.status === "refund_proposed");
+  if (waiting.length === 0) return null;
+  return (
+    <>
+      {waiting.map((order) => (
+        <ApprovalCard
+          key={order.id}
+          busy={busy}
+          title={order.status === "refund_proposed" ? "Refund" : "Over the limit"}
+          detail={`${euros(order.totalCents)} · ${order.lines.map((line) => `${line.qty} ${line.name}`).join(", ")}${
+            order.blockedRule ? ` · Rules check stopped on ${order.blockedRule}.` : " · Rules check: a captured order can be refunded."
+          }${order.notes ? ` ${wrapUntrusted(order.notes)}` : ""}`}
+          onApprove={() => onApprove(order.id)}
+        />
+      ))}
+    </>
+  );
+}
+
 function OrderCard({
   order,
   busy,
@@ -448,14 +491,14 @@ function OrderCard({
       </p>
       {order.cartSignature ? <p className="break-all font-mono text-xs text-muted">Receipt {order.cartSignature}</p> : null}
       <div className="flex flex-wrap gap-2">
-        {order.paypalCaptureId && order.status !== "refunded" ? (
+        {order.paypalCaptureId && (order.status === "captured" || order.status === "tracked") ? (
           <Button tone="quiet" disabled={busy} onClick={() => void onRun(() => trackPickup({ data: { orderId: order.id } }))}>
             Add pickup tracking
           </Button>
         ) : null}
-        {order.paypalCaptureId && order.status !== "refunded" && order.status !== "blocked" ? (
+        {order.paypalCaptureId && (order.status === "captured" || order.status === "tracked") ? (
           <Button tone="quiet" disabled={busy} onClick={() => void onRun(() => refundPayment({ data: { orderId: order.id } }))}>
-            Refund
+            Propose refund
           </Button>
         ) : null}
       </div>

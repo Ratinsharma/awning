@@ -34,3 +34,28 @@ export function Mode({ mode }: { mode: "live" | "replay" }) {
 export function Note({ children }: { children: ReactNode }) {
   return <p className="text-sm leading-relaxed text-muted">{children}</p>;
 }
+
+export const APPROVAL_LABEL = "AI proposes → Rules check → Owner approves → PayPal confirms";
+
+export function ApprovalCard({
+  title,
+  detail,
+  busy,
+  onApprove,
+}: {
+  title: string;
+  detail: string;
+  busy: boolean;
+  onApprove: () => void;
+}) {
+  return (
+    <Card className="flex flex-col gap-3">
+      <p className="font-mono text-xs leading-relaxed text-primary">{APPROVAL_LABEL}</p>
+      <h2 className="text-xl">{title}</h2>
+      <p className="text-sm leading-relaxed">{detail}</p>
+      <Button disabled={busy} onClick={onApprove}>
+        Approve
+      </Button>
+    </Card>
+  );
+}
